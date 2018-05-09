@@ -101,6 +101,11 @@ void monitorInit(Monitor *mon) {
     pthread_mutex_init(&mon->lock, NULL);
 }
 
+/**
+ * 添加wait队列
+ * @param mon
+ * @param thread
+ */
 void waitSetAppend(Monitor *mon, Thread *thread) {
     if(mon->wait_set == NULL)
         mon->wait_set = thread->wait_prev = thread;
@@ -112,6 +117,11 @@ void waitSetAppend(Monitor *mon, Thread *thread) {
     thread->wait_id = mon->wait_count++;
 }
 
+/**
+ * 将线程从等待队列中去掉
+ * @param mon
+ * @param thread
+ */
 void waitSetUnlinkThread(Monitor *mon, Thread *thread) {
     if(mon->wait_set == thread)
         if((mon->wait_set = mon->wait_set->wait_next) == thread)
@@ -122,6 +132,11 @@ void waitSetUnlinkThread(Monitor *mon, Thread *thread) {
     thread->wait_prev = thread->wait_next = NULL;
 }
 
+/**
+ * TODO: 下次就从这开始读，然后完成线程部分阅读，然后开始写class和thread的博客哈哈哈
+ * @param mon
+ * @return
+ */
 Thread *waitSetSignalNext(Monitor *mon) {
     Thread *thread = mon->wait_set;
 
@@ -135,11 +150,17 @@ Thread *waitSetSignalNext(Monitor *mon) {
     return thread;
 }
 
+/**
+ * 锁定该线程
+ * @param mon
+ * @param self
+ */
 void monitorLock(Monitor *mon, Thread *self) {
     if(mon->owner == self)
         mon->count++;
     else {
         if(pthread_mutex_trylock(&mon->lock)) {
+            // 加锁成功
             disableSuspend(self);
 
             self->blocked_mon = mon;
@@ -226,6 +247,9 @@ int monitorWait(Monitor *mon, Thread *self, long long ms, int ns,
         if(timed)
             getTimeoutRelative(&ts, ms, ns);
 
+        /**
+         * 其实起到实际功能的感觉只有这一段
+         */
         while(self->wait_next != NULL && !self->interrupting && !timeout)
             if(timed) {
                 timeout = pthread_cond_timedwait(&self->wait_cv,

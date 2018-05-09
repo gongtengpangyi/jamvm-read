@@ -153,6 +153,12 @@ int threadIsAlive(Thread *thread) {
     return state != CREATING && state != TERMINATED;
 }
 
+/**
+ * 线程休眠
+ * @param self
+ * @param ms
+ * @param ns
+ */
 void threadSleep(Thread *self, long long ms, int ns) {
 
    /* A sleep of zero should just yield, but a wait

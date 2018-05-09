@@ -79,9 +79,12 @@
 
 typedef struct thread Thread;
 
+/**
+ * 我觉得这个就是等待队列的一个监视器
+ */
 typedef struct monitor {
     pthread_mutex_t lock;
-    Thread *owner;
+    Thread *owner;// 拥有的线程
     Object *obj;
     int count;
     int in_wait;
