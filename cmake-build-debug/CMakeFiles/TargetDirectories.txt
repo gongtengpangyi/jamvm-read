@@ -1,0 +1,3 @@
+/home/shabi/Documents/openjdk/jamvm-2.0.0/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/shabi/Documents/openjdk/jamvm-2.0.0/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/shabi/Documents/openjdk/jamvm-2.0.0/cmake-build-debug/CMakeFiles/jamvm_2_0_0.dir
