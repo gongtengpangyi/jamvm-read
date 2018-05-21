@@ -346,7 +346,7 @@
 #define T_LONG                 11
 
 /* Class states */
-
+// 类状态，1～7分别表示：加载完毕，链接完毕，出错，正在初始化，初始化完毕，进入方法池，原生的（基本猜的）
 #define CLASS_LOADED            1
 #define CLASS_LINKED            2
 #define CLASS_BAD               3

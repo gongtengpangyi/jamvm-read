@@ -270,7 +270,7 @@ static void setIndexedAttributeData(AttributeData ***attributes,
     memcpy(attributes->data, pntr, length);
 
 /**
- * 解析class
+ * 解析class文件的内容，成为classblock
  * @param classname 类名
  * @param data
  * @param offset
@@ -284,16 +284,17 @@ Class *parseClass(char *classname, char *data, int offset, int len,
     u2 major_version, minor_version, this_idx, super_idx, attr_count;
     int cp_count, intf_count, injected_fields_count, i, j;
     ExtraAttributes extra_attributes;
-    u1 *ptr = (u1 *) data + offset;
+    u1 *ptr = (u1 *) data + offset;     // class文件的内容？？？
     ConstantPool *constant_pool;    // 常数池
-    Class **interfaces, *class;
-    ClassBlock *classblock;
+    Class **interfaces, *class; // 接口 类
+    ClassBlock *classblock; // 类对应的结构体
     u4 magic;
 
-    //
+    // 先获取一波魔术数
     READ_U4(magic, ptr, len);
 
     if (magic != 0xcafebabe) {
+        // 这个我也没搞清楚，反正就是如果魔术数是这个就直接异常
         signalException(java_lang_ClassFormatError, "bad magic");
         return NULL;
     }
@@ -304,16 +305,25 @@ Class *parseClass(char *classname, char *data, int offset, int len,
     if ((class = allocClass()) == NULL)
         return NULL;
 
+    /**
+     * 初始化classblock
+     */
     classblock = CLASS_CB(class);
+
+    // 获取一下总长度
     READ_U2(cp_count, ptr, len);
 
+    // 拿到classblock的常量池对象
     constant_pool = &classblock->constant_pool;
+    // 初始化常量池的type和info
     constant_pool->type = sysMalloc(cp_count);
     constant_pool->info = sysMalloc(cp_count * sizeof(ConstantPoolEntry));
 
     for (i = 1; i < cp_count; i++) {
         u1 tag;
-
+        /**
+         * 循环
+         */
         READ_U1(tag, ptr, len);
         CP_TYPE(constant_pool, i) = tag;
 
@@ -418,9 +428,12 @@ Class *parseClass(char *classname, char *data, int offset, int len,
         READ_TYPE_INDEX(super_idx, constant_pool, CONSTANT_Class, ptr, len);
     }
 
+    // 给类设置最初始化的classLoader
     classblock->class_loader = class_loader;
 
     READ_U2(intf_count = classblock->interfaces_count, ptr, len);
+
+    // 解析class文件中class的实现接口部分
     interfaces = classblock->interfaces =
             sysMalloc(intf_count * sizeof(Class *));
 
@@ -435,26 +448,39 @@ Class *parseClass(char *classname, char *data, int offset, int len,
 
     memset(&extra_attributes, 0, sizeof(ExtraAttributes));
 
+    /**
+     * 开始读取内部变量
+     */
     READ_U2(classblock->fields_count, ptr, len);
     injected_fields_count = classlibInjectedFieldsCount(classblock->name);
     classblock->fields_count += injected_fields_count;
     classblock->fields = sysMalloc(classblock->fields_count *
                                    sizeof(FieldBlock));
 
+    // 这步貌似为空，因为就特么永远为0
     if (injected_fields_count != 0) classlibFillInInjectedFields(classblock->name, classblock->fields);
 
     for (i = injected_fields_count; i < classblock->fields_count; i++) {
+        /**
+         * 这里永远是0开始循环遍历的
+         */
         FieldBlock *field = &classblock->fields[i];
         u2 name_idx, type_idx;
 
+        // 读取变量的私有属性
         READ_U2(field->access_flags, ptr, len);
+
+        // 读取变量的名字和类型
         READ_TYPE_INDEX(name_idx, constant_pool, CONSTANT_Utf8, ptr, len);
         READ_TYPE_INDEX(type_idx, constant_pool, CONSTANT_Utf8, ptr, len);
+
+        // 读完以后赋值给变量对应的结构体变量
         field->name = CP_UTF8(constant_pool, name_idx);
         field->type = CP_UTF8(constant_pool, type_idx);
         field->signature = NULL;
         field->constant = 0;
 
+        // 这玩意不循环，不管
         for (j = 0; j < injected_fields_count; j++)
             if (field->name == classblock->fields[j].name) {
                 jam_fprintf(stderr, "Classlib mismatch: injected field "
@@ -463,6 +489,7 @@ Class *parseClass(char *classname, char *data, int offset, int len,
                 exitVM(1);
             }
 
+        // 读他的属性
         READ_U2(attr_count, ptr, len);
         for (; attr_count != 0; attr_count--) {
             u2 attr_name_idx;
@@ -499,6 +526,12 @@ Class *parseClass(char *classname, char *data, int offset, int len,
                 ptr += attr_length;
         }
     }
+
+    /**
+     *
+     * 上面那票是解析类变量，下面这票是解析方法，差不多，就是结构不同
+     *
+     */
 
     READ_U2(classblock->methods_count, ptr, len);
     classblock->methods = sysMalloc(classblock->methods_count *
@@ -636,6 +669,10 @@ Class *parseClass(char *classname, char *data, int offset, int len,
         }
     }
 
+
+    /**
+     * 然后这里就是开始读取类的属性了
+     */
     READ_U2(attr_count, ptr, len);
     for (; attr_count != 0; attr_count--) {
         u2 attr_name_idx;
@@ -766,12 +803,13 @@ Class *parseClass(char *classname, char *data, int offset, int len,
             return NULL;
     }
 
+    // 将此类的状态改为，已经加载完毕
     classblock->state = CLASS_LOADED;
     return class;
 }
 
 /**
- *
+ * 定义class
  * @param classname
  * @param data
  * @param offset
@@ -782,9 +820,11 @@ Class *parseClass(char *classname, char *data, int offset, int len,
 Class *defineClass(char *classname, char *data, int offset, int len,
                    Object *class_loader) {
 
+    // 解析class文件
     Class *class = parseClass(classname, data, offset, len, class_loader);
 
     if (class != NULL) {
+        // 将其加入class的hash
         Class *found = addClassToHash(class, class_loader);
 
         if (found != class) {
@@ -874,6 +914,12 @@ Class *createArrayClass(char *classname, Object *class_loader) {
     return found;
 }
 
+/**
+ * 新建一个原生的class
+ * @param classname
+ * @param index
+ * @return
+ */
 Class *createPrimClass(char *classname, int index) {
     Class *class;
     ClassBlock *classblock;
@@ -881,6 +927,9 @@ Class *createPrimClass(char *classname, int index) {
     if ((class = allocClass()) == NULL)
         return NULL;
 
+    /**
+     * 初始构造
+     */
     classblock = CLASS_CB(class);
     classblock->name = classname;
     classblock->state = CLASS_PRIM + index;
@@ -888,6 +937,9 @@ Class *createPrimClass(char *classname, int index) {
 
     prepareClass(class);
 
+    /**
+     * 将这个类添加到原生中，并返回
+     */
     lockHashTable(boot_classes);
     if (prim_classes[index] == NULL)
         prim_classes[index] = class;
@@ -895,6 +947,7 @@ Class *createPrimClass(char *classname, int index) {
 
     if (verbose)
         jam_printf("[Created primitive class %s]\n", classname);
+
 
     return prim_classes[index];
 }
@@ -1086,9 +1139,15 @@ typedef struct miranda {
     int default_conflict;
 } Miranda;
 
+
+/**
+ * 链接类
+ * @param class
+ */
 void linkClass(Class *class) {
     static MethodBlock *obj_fnlzr_mthd = NULL;
 
+    // 先链接一下这玩意的父类
     ClassBlock *cb = CLASS_CB(class);
     Class *super = (cb->access_flags & ACC_INTERFACE) ? NULL : cb->super;
 
@@ -1097,6 +1156,9 @@ void linkClass(Class *class) {
     MethodBlock **spr_mthd_tbl = NULL;
     MethodBlock *mb;
 
+    /**
+     * 初始化几个参数
+     */
     int new_methods_count = 0;
     int spr_imthd_tbl_sze = 0;
     int itbl_offset_count = 0;
@@ -1107,11 +1169,14 @@ void linkClass(Class *class) {
     int spr_flags = 0;
     Thread *self;
 
+
     if (cb->state >= CLASS_LINKED)
         return;
 
+    // 先锁了
     objectLock(class);
 
+    // 要是其实已经link过了的就退出
     if (cb->state >= CLASS_LINKED)
         goto unlock;
 
@@ -1119,6 +1184,7 @@ void linkClass(Class *class) {
         jam_printf("[Linking class %s]\n", cb->name);
 
     if (super) {
+        // 有父类就先link父类，然后我在想这样子是不是也顺便解释了一下这个类加载机制
         ClassBlock *super_cb = CLASS_CB(super);
         if (super_cb->state < CLASS_LINKED)
             linkClass(super);
@@ -1131,17 +1197,22 @@ void linkClass(Class *class) {
     }
 
     /* Calculate object layout */
+    // 初始化这个fields
     prepareFields(class);
 
     /* Prepare methods */
 
     for (mb = cb->methods, i = 0; i < cb->methods_count; i++, mb++) {
+        /**
+         * 便利所有的方法
+         */
         int count = 0;
         char *sig = mb->type;
 
         /* calculate argument count from signature */
         SCAN_SIG(sig, count += 2, count++);
 
+        // 如果这玩意是static的，就等于参数个数，否则+1,（我觉得这个和py要在方法里加上self是一个道理）
         if (mb->access_flags & ACC_STATIC)
             mb->args_count = count;
         else
@@ -1519,22 +1590,35 @@ void linkClass(Class *class) {
     objectUnlock(class);
 }
 
-//TODO
+/**
+ *
+ * @param class
+ * @return
+ */
+
 Class *initClass(Class *class) {
+    /**
+     * 初始化类
+     */
     ClassBlock *cb = CLASS_CB(class);
+    // 常量池
     ConstantPool *cp = &cb->constant_pool;
+    // 获取变量和方法
     FieldBlock *fb = cb->fields;
     MethodBlock *mb;
     Object *excep;
     int state, i;
 
+    // 如果这玩意已经初始化了就不管了
     if (cb->state >= CLASS_INITED)
         return class;
 
+    // 链接class
     linkClass(class);
     objectLock(class);
 
     while (cb->state == CLASS_INITING)
+        // 如果这个class在init的过程中，根据是否目前正在执行判断如何操作
         if (cb->initing_tid == threadSelf()->id) {
             objectUnlock(class);
             return class;
@@ -1547,6 +1631,7 @@ Class *initClass(Class *class) {
         }
 
     if (cb->state >= CLASS_INITED) {
+        // 如果已经init过了就解锁返回
         objectUnlock(class);
         return class;
     }
@@ -1557,6 +1642,7 @@ Class *initClass(Class *class) {
         return NULL;
     }
 
+    // 对于还没有init的，先把状态改为initing
     cb->state = CLASS_INITING;
     cb->initing_tid = threadSelf()->id;
 
@@ -1564,6 +1650,9 @@ Class *initClass(Class *class) {
 
     if (!(cb->access_flags & ACC_INTERFACE) && cb->super
         && (CLASS_CB(cb->super)->state != CLASS_INITED)) {
+        /**
+         * 判断，有父类先搞定父类
+         */
         initClass(cb->super);
         if (exceptionOccurred()) {
             state = CLASS_BAD;
@@ -1621,6 +1710,7 @@ Class *initClass(Class *class) {
     objectLock(class);
     cb->state = state;
 
+    // 通知全局
     objectNotifyAll(class);
     objectUnlock(class);
 
@@ -1650,6 +1740,11 @@ char *findFileEntry(char *path, int *file_len) {
     return NULL;
 }
 
+/**
+ * 定义包
+ * @param classname
+ * @param index
+ */
 void defineBootPackage(char *classname, int index) {
     char *last_slash = strrchr(classname, '/');
 
@@ -1681,8 +1776,10 @@ void defineBootPackage(char *classname, int index) {
  * @return
  */
 Class *loadSystemClass(char *classname) {
+    // 获取类名字长度
     int file_len, fname_len = strlen(classname) + 8;
     char buff[max_cp_element_len + fname_len];
+    // 类名
     char filename[fname_len];
     Class *class = NULL;
     char *data = NULL;
@@ -1786,6 +1883,11 @@ Class *findSystemClass0(char *classname) {
     return class;
 }
 
+/**
+ * 获取
+ * @param classname
+ * @return
+ */
 Class *findSystemClass(char *classname) {
     Class *class = findSystemClass0(classname);
 
@@ -1795,6 +1897,12 @@ Class *findSystemClass(char *classname) {
     return class;
 }
 
+/**
+ * 根据class名获取某个classLoader加载的类
+ * @param classname
+ * @param class_loader
+ * @return
+ */
 Class *findArrayClassFromClassLoader(char *classname, Object *class_loader) {
     Class *class = findHashedClass(classname, class_loader);
 
@@ -1806,7 +1914,7 @@ Class *findArrayClassFromClassLoader(char *classname, Object *class_loader) {
 }
 
 /**
- * 根据类名获取基本变量的类
+ * 根据类名获取原生的类
  * @param classname
  * @return
  */
